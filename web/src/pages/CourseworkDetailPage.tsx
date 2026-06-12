@@ -104,7 +104,57 @@ function QuizForm({
   );
 }
 
+// Рубрика для ученика: критерии и уровни; после возврата подсвечен выбор учителя.
+function StudentRubric({ rubric, submission }: { rubric: NonNullable<Coursework['rubric']>; submission: Submission | null }) {
+  const chosen = new Map((submission?.rubricGrades ?? []).map((g) => [g.criterion_id, g.level_id]));
+  return (
+    <div className="card card-pad stack" style={{ gap: 8 }}>
+      <h3>Критерии оценивания</h3>
+      {rubric.criteria.map((c) => (
+        <div key={c.id}>
+          <div className="small" style={{ fontWeight: 500 }}>
+            {c.title}
+            {c.description && <span className="faint"> — {c.description}</span>}
+          </div>
+          <div className="row mt-8" style={{ flexWrap: 'wrap', gap: 6 }}>
+            {c.levels.map((l) => (
+              <span key={l.id} className={chosen.get(c.id) === l.id ? 'badge badge-ok' : 'badge'}>
+                {l.title} · {l.points}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Материал: без сдачи — только содержимое и обсуждение.
+function StudentMaterialView({ course, cw }: { course: Course; cw: Coursework }) {
+  return (
+    <div className="content-narrow stack">
+      {cw.description && (
+        <div className="card card-pad">
+          <p className="pre-wrap">{cw.description}</p>
+        </div>
+      )}
+      <AttachmentList attachments={cw.attachments} />
+      <div className="card card-pad">
+        <Comments
+          scope="COURSEWORK"
+          scopeId={cw.id}
+          canComment={course.state === 'ACTIVE' && course.stream_mode !== 'TEACHERS_ONLY'}
+          canModerate={false}
+          title="Комментарии курса"
+          compact
+        />
+      </div>
+    </div>
+  );
+}
+
 function StudentView({ course, cw }: { course: Course; cw: Coursework }) {
+  const brand = useBrand();
   const toast = useToast();
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [quizMeta, setQuizMeta] = useState<{ visible: boolean }>({ visible: false });
@@ -208,6 +258,7 @@ function StudentView({ course, cw }: { course: Course; cw: Coursework }) {
             onChange={(qid, value) => setAnswers(new Map(answers).set(qid, value))}
           />
         )}
+        {cw.rubric && cw.rubric.criteria.length > 0 && <StudentRubric rubric={cw.rubric} submission={submission} />}
         <div className="card card-pad">
           <Comments
             scope="COURSEWORK"
@@ -294,16 +345,18 @@ function StudentView({ course, cw }: { course: Course; cw: Coursework }) {
           )}
         </div>
 
-        <div className="card card-pad">
-          <Comments
-            scope="SUBMISSION"
-            scopeId={submission.id}
-            canComment={course.state === 'ACTIVE'}
-            canModerate={false}
-            title="Приватные комментарии (видны только преподавателю)"
-            compact
-          />
-        </div>
+        {brand.features.privateComments && (
+          <div className="card card-pad">
+            <Comments
+              scope="SUBMISSION"
+              scopeId={submission.id}
+              canComment={course.state === 'ACTIVE'}
+              canModerate={false}
+              title="Приватные комментарии (видны только преподавателю)"
+              compact
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -379,7 +432,7 @@ function TeacherView({ course, cw }: { course: Course; cw: Coursework }) {
             </div>
           </div>
         )}
-        {cw.type !== 'MATERIAL' && (
+        {cw.type !== 'MATERIAL' && cw.state === 'PUBLISHED' && (
           <button className="btn" onClick={() => navigate(`/courses/${course.id}/coursework/${cw.id}/review`)}>
             Работы учеников
           </button>
@@ -431,7 +484,13 @@ export function CourseworkDetailPage() {
           {cw.type !== 'MATERIAL' && <>{formatDue(cw.due_at)}{cw.max_points ? ` · ${cw.max_points} баллов` : ' · без оценки'}</>}
         </div>
       </div>
-      {course.role === 'TEACHER' ? <TeacherView course={course} cw={cw} /> : <StudentView course={course} cw={cw} />}
+      {course.role === 'TEACHER' ? (
+        <TeacherView course={course} cw={cw} />
+      ) : cw.type === 'MATERIAL' ? (
+        <StudentMaterialView course={course} cw={cw} />
+      ) : (
+        <StudentView course={course} cw={cw} />
+      )}
     </div>
   );
 }

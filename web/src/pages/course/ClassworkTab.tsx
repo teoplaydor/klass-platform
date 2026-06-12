@@ -100,7 +100,7 @@ function WorkRow({ course, cw, onChanged }: { course: Course; cw: Coursework; on
             <Menu
               items={[
                 { label: 'Открыть', onClick: () => navigate(`/courses/${course.id}/coursework/${cw.id}`) },
-                ...(cw.type !== 'MATERIAL'
+                ...(cw.type !== 'MATERIAL' && cw.state === 'PUBLISHED'
                   ? [{ label: 'Работы учеников', onClick: () => navigate(`/courses/${course.id}/coursework/${cw.id}/review`) }]
                   : []),
                 { label: 'Изменить', onClick: () => navigate(`/courses/${course.id}/coursework/${cw.id}/edit`) },
@@ -118,7 +118,7 @@ function WorkRow({ course, cw, onChanged }: { course: Course; cw: Coursework; on
             <Link className="btn btn-ghost btn-sm" to={`/courses/${course.id}/coursework/${cw.id}`}>
               Открыть
             </Link>
-            {isTeacher && cw.type !== 'MATERIAL' && (
+            {isTeacher && cw.type !== 'MATERIAL' && cw.state === 'PUBLISHED' && (
               <Link className="btn btn-ghost btn-sm" to={`/courses/${course.id}/coursework/${cw.id}/review`}>
                 Проверка работ
               </Link>

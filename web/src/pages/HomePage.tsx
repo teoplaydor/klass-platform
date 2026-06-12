@@ -191,7 +191,9 @@ export function HomePage() {
                       c.role === 'TEACHER'
                         ? [
                             { label: 'Открыть', onClick: () => navigate(`/courses/${c.id}`) },
-                            { label: 'В архив', onClick: () => void archive(c.id), danger: true },
+                            ...(brand.features.archive
+                              ? [{ label: 'В архив', onClick: () => void archive(c.id), danger: true }]
+                              : []),
                           ]
                         : [
                             { label: 'Открыть', onClick: () => navigate(`/courses/${c.id}`) },

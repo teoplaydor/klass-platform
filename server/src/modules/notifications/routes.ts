@@ -1,10 +1,16 @@
 // Маршруты уведомлений («колокольчик»).
 import { Router } from 'express';
 import { all, get, run } from '../../core/db.js';
+import { brand } from '../../config.js';
+import { forbidden } from '../../core/errors.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 
 export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth);
+notificationsRouter.use((_req, _res, next) => {
+  if (!brand.features.notifications) throw forbidden('Уведомления отключены');
+  next();
+});
 
 notificationsRouter.get('/', (req, res) => {
   const user = currentUser(req);

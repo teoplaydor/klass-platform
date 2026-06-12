@@ -4,7 +4,7 @@ import { randomInt } from 'node:crypto';
 import { all, get, run, now, tx } from '../../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../../core/errors.js';
 import { str, optStr, idParam, optOneOf } from '../../core/validate.js';
-import { courseById, memberRole, requireMember, requireTeacher } from '../../core/access.js';
+import { courseById, memberRole, requireActive, requireMember, requireTeacher } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { brand } from '../../config.js';
 import { notify } from '../notifications/service.js';
@@ -187,6 +187,7 @@ coursesRouter.post('/:id/copy', (req, res) => {
 });
 
 coursesRouter.post('/:id/archive', (req, res) => {
+  if (!brand.features.archive) throw forbidden('Архивирование отключено');
   const user = currentUser(req);
   const courseId = idParam(req.params.id);
   requireTeacher(courseId, user.id);
@@ -217,7 +218,7 @@ coursesRouter.delete('/:id', (req, res) => {
 coursesRouter.post('/:id/code/reset', (req, res) => {
   const user = currentUser(req);
   const courseId = idParam(req.params.id);
-  requireTeacher(courseId, user.id);
+  requireActive(requireTeacher(courseId, user.id));
   const code = generateCode();
   run('UPDATE courses SET enrollment_code = ?, updated_at = ? WHERE id = ?', code, now(), courseId);
   res.json({ enrollmentCode: code });
@@ -242,6 +243,7 @@ coursesRouter.post('/:id/invite', (req, res) => {
   const user = currentUser(req);
   const courseId = idParam(req.params.id);
   const course = requireTeacher(courseId, user.id);
+  requireActive(course);
   const email = str(req.body, 'email', { max: 254 }).toLowerCase();
   const role = optOneOf(req.body, 'role', ['TEACHER', 'STUDENT'] as const) ?? 'STUDENT';
   const invited = get<{ id: number }>('SELECT id FROM users WHERE email = ?', email);

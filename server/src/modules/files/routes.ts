@@ -10,6 +10,7 @@ import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { idParam } from '../../core/validate.js';
 import { memberRole } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
+import { visibleToStudent, type CourseworkRow } from '../coursework/routes.js';
 import type { AttachmentRow } from './attachments.js';
 
 export const filesRouter = Router();
@@ -29,9 +30,17 @@ const upload = multer({
   limits: { fileSize: brand.limits.maxUploadSizeMb * 1024 * 1024 },
 });
 
-filesRouter.post('/', upload.single('file'), (req, res) => {
+// Проверка фичефлага ДО multer: иначе файл успел бы записаться на диск
+function requireUploadsEnabled(_req: unknown, _res: unknown, next: (err?: unknown) => void): void {
+  if (!brand.features.fileUploads) {
+    next(forbidden('Загрузка файлов отключена'));
+    return;
+  }
+  next();
+}
+
+filesRouter.post('/', requireUploadsEnabled, upload.single('file'), (req, res) => {
   const user = currentUser(req);
-  if (!brand.features.fileUploads) throw forbidden('Загрузка файлов отключена');
   if (!req.file) throw badRequest('Файл не передан (поле «file»)');
   // multer отдаёт originalname в latin1 — восстанавливаем UTF-8 (кириллица в именах)
   const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
@@ -45,17 +54,27 @@ filesRouter.post('/', upload.single('file'), (req, res) => {
 });
 
 // Доступ к файлу определяется его владельцем (заданием, объявлением, сдачей).
+// Права на файл не слабее прав на сущность: ученик не скачает вложение
+// черновика, отложенного поста или задания, назначенного другим.
 function canAccess(att: AttachmentRow, userId: number): boolean {
   switch (att.owner_type) {
     case 'UPLOAD':
       return att.uploaded_by === userId;
     case 'COURSEWORK': {
-      const cw = get<{ course_id: number }>('SELECT course_id FROM coursework WHERE id = ?', att.owner_id);
-      return !!cw && memberRole(cw.course_id, userId) !== null;
+      const cw = get<CourseworkRow>('SELECT * FROM coursework WHERE id = ?', att.owner_id);
+      if (!cw) return false;
+      const role = memberRole(cw.course_id, userId);
+      if (role === 'TEACHER') return true;
+      return role === 'STUDENT' && visibleToStudent(cw, userId);
     }
     case 'ANNOUNCEMENT': {
-      const a = get<{ course_id: number }>('SELECT course_id FROM announcements WHERE id = ?', att.owner_id);
-      return !!a && memberRole(a.course_id, userId) !== null;
+      const a = get<{ course_id: number; state: string }>(
+        'SELECT course_id, state FROM announcements WHERE id = ?', att.owner_id,
+      );
+      if (!a) return false;
+      const role = memberRole(a.course_id, userId);
+      if (role === 'TEACHER') return true;
+      return role === 'STUDENT' && a.state === 'PUBLISHED';
     }
     case 'SUBMISSION': {
       const s = get<{ student_id: number; coursework_id: number }>(

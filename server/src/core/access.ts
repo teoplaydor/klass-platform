@@ -1,6 +1,6 @@
 // Проверки прав доступа к курсам. Используются всеми модулями.
 import { all, get } from './db.js';
-import { forbidden, notFound } from './errors.js';
+import { badRequest, forbidden, notFound } from './errors.js';
 
 export type CourseRole = 'TEACHER' | 'STUDENT';
 
@@ -47,6 +47,20 @@ export function requireMember(courseId: number, userId: number): { course: Cours
 export function requireTeacher(courseId: number, userId: number): CourseRow {
   const { course, role } = requireMember(courseId, userId);
   if (role !== 'TEACHER') throw forbidden('Действие доступно только преподавателю');
+  return course;
+}
+
+// Архивный курс доступен только для чтения: любые изменения содержимого
+// (посты, задания, сдачи, оценки, участники) требуют активного курса.
+export function requireActive(course: Pick<CourseRow, 'state'>): void {
+  if (course.state !== 'ACTIVE') {
+    throw badRequest('Курс находится в архиве и доступен только для чтения');
+  }
+}
+
+export function requireActiveCourse(courseId: number): CourseRow {
+  const course = courseById(courseId);
+  requireActive(course);
   return course;
 }
 

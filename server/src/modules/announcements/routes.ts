@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { all, get, run, now, tx } from '../../core/db.js';
 import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { str, idParam, optOneOf, optDate } from '../../core/validate.js';
-import { requireMember, requireTeacher, studentIds } from '../../core/access.js';
+import { requireActive, requireMember, requireTeacher, studentIds } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { attachItems, attachmentsFor } from '../files/attachments.js';
 import { brand } from '../../config.js';
@@ -52,6 +52,7 @@ announcementsRouter.post('/courses/:courseId/announcements', (req, res) => {
   const user = currentUser(req);
   const courseId = idParam(req.params.courseId, 'courseId');
   const { course, role } = requireMember(courseId, user.id);
+  requireActive(course);
   // Право учеников писать в ленту определяется режимом ленты курса
   if (role === 'STUDENT' && course.stream_mode !== 'ALL_POST') {
     throw forbidden('В этом курсе объявления могут публиковать только преподаватели');
@@ -95,7 +96,8 @@ announcementsRouter.patch('/announcements/:id', (req, res) => {
   const id = idParam(req.params.id);
   const row = get<AnnouncementRow>('SELECT * FROM announcements WHERE id = ?', id);
   if (!row) throw notFound('Объявление не найдено');
-  const { role } = requireMember(row.course_id, user.id);
+  const { course, role } = requireMember(row.course_id, user.id);
+  requireActive(course);
   if (row.author_id !== user.id && role !== 'TEACHER') throw forbidden();
   const text = str(req.body, 'text', { max: 20000 });
   tx(() => {
@@ -111,7 +113,7 @@ announcementsRouter.post('/announcements/:id/pin', (req, res) => {
   const id = idParam(req.params.id);
   const row = get<AnnouncementRow>('SELECT * FROM announcements WHERE id = ?', id);
   if (!row) throw notFound('Объявление не найдено');
-  requireTeacher(row.course_id, user.id);
+  requireActive(requireTeacher(row.course_id, user.id));
   run('UPDATE announcements SET pinned = ?, updated_at = ? WHERE id = ?', row.pinned ? 0 : 1, now(), id);
   res.json({ pinned: !row.pinned });
 });
@@ -121,7 +123,8 @@ announcementsRouter.delete('/announcements/:id', (req, res) => {
   const id = idParam(req.params.id);
   const row = get<AnnouncementRow>('SELECT * FROM announcements WHERE id = ?', id);
   if (!row) throw notFound('Объявление не найдено');
-  const { role } = requireMember(row.course_id, user.id);
+  const { course, role } = requireMember(row.course_id, user.id);
+  requireActive(course);
   if (row.author_id !== user.id && role !== 'TEACHER') throw forbidden();
   run('DELETE FROM announcements WHERE id = ?', id);
   res.json({ ok: true });

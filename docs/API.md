@@ -49,7 +49,7 @@ GET/POST `/api/courses/:courseId/topics`; PATCH/DELETE `/api/topics/:id`.
 | GET | `/api/courses/:courseId/coursework` | учителю — всё (+счётчики), ученику — опубликованное и адресованное (+своя сдача) |
 | POST | `/api/courses/:courseId/coursework` | `type (ASSIGNMENT\|QUIZ\|QUESTION\|MATERIAL), title, description?, maxPoints?, dueAt?, topicId?, allowLate?, state (PUBLISHED\|DRAFT\|SCHEDULED), scheduledAt?, assigneeIds?, attachments?` |
 | GET | `/api/coursework/:id` | деталь (+topic, attachments, rubric; учителю — assigneeIds, counters) |
-| PATCH | `/api/coursework/:id` | обновление |
+| PATCH | `/api/coursework/:id` | обновление; `assigneeIds` — полная замена адресатов (пустой массив = весь курс) |
 | POST | `/api/coursework/:id/publish` | публикация черновика (уведомляет учеников) |
 | DELETE | `/api/coursework/:id` | удаление |
 | PUT | `/api/coursework/:id/rubric` | `criteria: [{title, description?, levels: [{title, points}]}]` |
@@ -63,7 +63,7 @@ GET/POST `/api/courses/:courseId/topics`; PATCH/DELETE `/api/topics/:id`.
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | GET | `/api/coursework/:id/quiz` | вопросы (ученику — без правильных ответов) |
-| PUT | `/api/coursework/:id/quiz` | `questions: [{type: SINGLE\|MULTI\|TEXT, text, options?, correct, points}], showScore?` — полная замена; maxPoints = сумма баллов |
+| PUT | `/api/coursework/:id/quiz` | `questions: [{type: SINGLE\|MULTI\|TEXT, text, options?, correct, points}], showScore?` — полная замена; maxPoints = сумма баллов; 409, если ученики уже отвечали |
 
 ## Сдачи
 

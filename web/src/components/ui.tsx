@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiRequestError, del, uploadFile } from '../api';
+import { BrandContext } from '../brand';
 import type { Attachment, PersonRef } from '../types';
 import { formatBytes, initials } from '../utils';
 
@@ -249,17 +250,21 @@ export function AttachmentPicker({
 }: {
   pending: ReturnType<typeof usePendingAttachments>;
 }) {
+  const brand = useContext(BrandContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
+  const uploadsEnabled = brand?.features.fileUploads !== false;
 
   return (
     <div className="stack" style={{ gap: 8 }}>
       <div className="row">
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={pending.uploading}>
-          {pending.uploading ? 'Загрузка…' : 'Прикрепить файл'}
-        </button>
+        {uploadsEnabled && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={pending.uploading}>
+            {pending.uploading ? 'Загрузка…' : 'Прикрепить файл'}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLinkOpen(true)}>
           Добавить ссылку
         </button>

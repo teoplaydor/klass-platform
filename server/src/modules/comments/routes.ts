@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { all, get, run, now } from '../../core/db.js';
 import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { str, oneOf, idParam } from '../../core/validate.js';
-import { memberRole, requireMember } from '../../core/access.js';
+import { courseById, memberRole, requireActive, requireMember } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { brand } from '../../config.js';
 import { notify } from '../notifications/service.js';
@@ -17,7 +17,9 @@ const SCOPES = ['ANNOUNCEMENT', 'COURSEWORK', 'SUBMISSION'] as const;
 type Scope = (typeof SCOPES)[number];
 
 // Проверяет право пользователя видеть ветку комментариев; возвращает контекст.
+// Фичефлаги: comments — публичные ветки, privateComments — переписка по сдаче.
 function checkScope(scope: Scope, scopeId: number, userId: number): { courseId: number; participants: number[] } {
+  if (scope !== 'SUBMISSION' && !brand.features.comments) throw forbidden('Комментарии отключены');
   if (scope === 'ANNOUNCEMENT') {
     const a = get<{ course_id: number; author_id: number; state: string }>(
       'SELECT course_id, author_id, state FROM announcements WHERE id = ?',
@@ -68,7 +70,6 @@ commentsRouter.get('/', (req, res) => {
 });
 
 commentsRouter.post('/', (req, res) => {
-  if (!brand.features.comments) throw forbidden('Комментарии отключены');
   const user = currentUser(req);
   const scope = oneOf(req.body, 'scope', SCOPES);
   const scopeId = Number(req.body.scopeId);
@@ -76,6 +77,7 @@ commentsRouter.post('/', (req, res) => {
   const text = str(req.body, 'text', { max: 10000 });
 
   const ctx = checkScope(scope, scopeId, user.id);
+  requireActive(courseById(ctx.courseId));
   // Публичные комментарии учеников ограничены режимом ленты курса
   if (scope !== 'SUBMISSION' && memberRole(ctx.courseId, user.id) === 'STUDENT') {
     const course = get<{ stream_mode: string }>('SELECT stream_mode FROM courses WHERE id = ?', ctx.courseId);

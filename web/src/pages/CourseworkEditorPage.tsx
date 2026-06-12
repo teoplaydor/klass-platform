@@ -3,7 +3,7 @@
 // справа — панель настроек (тема, баллы, срок, адресаты), как в Classroom.
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { get, patch, post, put } from '../api';
+import { ApiRequestError, del, get, patch, post, put } from '../api';
 import { useBrand } from '../brand';
 import {
   AttachmentList,
@@ -171,6 +171,112 @@ function QuestionEditor({
   );
 }
 
+// Редактируемая рубрика: критерии × уровни.
+interface EditableCriterion {
+  key: string;
+  title: string;
+  description: string;
+  levels: { title: string; points: number }[];
+}
+
+function RubricEditor({
+  criteria,
+  onChange,
+}: {
+  criteria: EditableCriterion[];
+  onChange: (next: EditableCriterion[]) => void;
+}) {
+  const update = (key: string, patch: Partial<EditableCriterion>) =>
+    onChange(criteria.map((c) => (c.key === key ? { ...c, ...patch } : c)));
+
+  return (
+    <div className="card card-pad stack" style={{ gap: 12 }}>
+      <div className="row-between">
+        <h3>Рубрика оценивания</h3>
+        {criteria.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange([])}>
+            Убрать рубрику
+          </button>
+        )}
+      </div>
+      {criteria.map((c, ci) => (
+        <div key={c.key} className="stack" style={{ gap: 6, borderTop: ci > 0 ? '1px solid var(--color-border)' : 'none', paddingTop: ci > 0 ? 12 : 0 }}>
+          <div className="row">
+            <input
+              className="input"
+              placeholder={`Критерий ${ci + 1} (например: Полнота решения)`}
+              value={c.title}
+              onChange={(e) => update(c.key, { title: e.target.value })}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => onChange(criteria.filter((x) => x.key !== c.key))}
+              aria-label="Удалить критерий"
+            >
+              ×
+            </button>
+          </div>
+          {c.levels.map((l, li) => (
+            <div key={li} className="row" style={{ paddingLeft: 16 }}>
+              <input
+                className="input"
+                placeholder={`Уровень ${li + 1} (например: Полностью)`}
+                value={l.title}
+                onChange={(e) =>
+                  update(c.key, { levels: c.levels.map((x, i) => (i === li ? { ...x, title: e.target.value } : x)) })
+                }
+              />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                style={{ width: 90 }}
+                title="Баллы уровня"
+                value={l.points}
+                onChange={(e) =>
+                  update(c.key, { levels: c.levels.map((x, i) => (i === li ? { ...x, points: Number(e.target.value) } : x)) })
+                }
+              />
+              {c.levels.length > 1 && (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => update(c.key, { levels: c.levels.filter((_, i) => i !== li) })}
+                  aria-label="Убрать уровень"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ alignSelf: 'flex-start', marginLeft: 16 }}
+            onClick={() => update(c.key, { levels: [...c.levels, { title: '', points: 0 }] })}
+          >
+            Добавить уровень
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        style={{ alignSelf: 'flex-start' }}
+        onClick={() =>
+          onChange([
+            ...criteria,
+            { key: String(Date.now()), title: '', description: '', levels: [{ title: '', points: 1 }] },
+          ])
+        }
+      >
+        Добавить критерий
+      </button>
+    </div>
+  );
+}
+
 export function CourseworkEditorPage() {
   const { courseId, courseworkId } = useParams();
   const [params] = useSearchParams();
@@ -196,6 +302,11 @@ export function CourseworkEditorPage() {
   const [scheduledAt, setScheduledAt] = useState('');
   const [questions, setQuestions] = useState<EditableQuestion[]>([newQuestion()]);
   const [showScore, setShowScore] = useState(true);
+  // Снимок исходного теста: PUT отправляется только при реальных изменениях,
+  // чтобы не задеть ответы учеников лишним сохранением
+  const [quizSnapshot, setQuizSnapshot] = useState('');
+  const [rubric, setRubric] = useState<EditableCriterion[]>([]);
+  const [hadRubric, setHadRubric] = useState(false);
   const [busy, setBusy] = useState(false);
   const pending = usePendingAttachments();
 
@@ -221,21 +332,32 @@ export function CourseworkEditorPage() {
           setAllowLate(!!cw.allow_late);
           setShowScore(!!cw.quiz_show_score);
           setAssigneeIds(cw.assigneeIds ?? []);
+          if (cw.rubric && cw.rubric.criteria.length > 0) {
+            setHadRubric(true);
+            setRubric(
+              cw.rubric.criteria.map((c) => ({
+                key: String(c.id),
+                title: c.title,
+                description: c.description ?? '',
+                levels: c.levels.map((l) => ({ title: l.title, points: l.points })),
+              })),
+            );
+          }
           if (cw.type === 'QUIZ') {
             return get<{ questions: QuizQuestion[] }>(`/api/coursework/${cw.id}/quiz`).then((qr) => {
               if (qr.questions.length > 0) {
-                setQuestions(
-                  qr.questions.map((q) => ({
-                    key: String(q.id),
-                    type: q.type,
-                    text: q.text,
-                    options: q.options ?? ['', ''],
-                    correctSingle: q.type === 'SINGLE' ? Number(q.correct) : 0,
-                    correctMulti: q.type === 'MULTI' ? (q.correct as number[]) : [],
-                    correctText: q.type === 'TEXT' ? (q.correct as string[]).join('; ') : '',
-                    points: q.points,
-                  })),
-                );
+                const loaded = qr.questions.map((q) => ({
+                  key: String(q.id),
+                  type: q.type,
+                  text: q.text,
+                  options: q.options ?? ['', ''],
+                  correctSingle: q.type === 'SINGLE' ? Number(q.correct) : 0,
+                  correctMulti: q.type === 'MULTI' ? (q.correct as number[]) : [],
+                  correctText: q.type === 'TEXT' ? (q.correct as string[]).join('; ') : '',
+                  points: q.points,
+                }));
+                setQuestions(loaded);
+                setQuizSnapshot(JSON.stringify({ q: loaded.map(({ key, ...rest }) => rest), s: !!cw.quiz_show_score }));
               }
             });
           }
@@ -301,7 +423,34 @@ export function CourseworkEditorPage() {
         cwId = r.coursework.id;
       }
       if (isQuiz) {
-        await put(`/api/coursework/${cwId}/quiz`, { questions: quizPayload, showScore });
+        // PUT отправляется только если вопросы или настройка изменились:
+        // полная замена вопросов недоступна после первых ответов учеников
+        const current = JSON.stringify({ q: questions.map(({ key, ...rest }) => rest), s: showScore });
+        if (current !== quizSnapshot) {
+          try {
+            await put(`/api/coursework/${cwId}/quiz`, { questions: quizPayload, showScore });
+          } catch (e) {
+            if (e instanceof ApiRequestError && e.status === 409) {
+              toast.error(e);
+            } else {
+              throw e;
+            }
+          }
+        }
+      }
+      if (brand.features.rubrics && !isMaterial && !isQuiz) {
+        const validCriteria = rubric.filter((c) => c.title.trim() && c.levels.some((l) => l.title.trim()));
+        if (validCriteria.length > 0) {
+          await put(`/api/coursework/${cwId}/rubric`, {
+            criteria: validCriteria.map((c) => ({
+              title: c.title.trim(),
+              description: c.description.trim() || undefined,
+              levels: c.levels.filter((l) => l.title.trim()).map((l) => ({ title: l.title.trim(), points: l.points })),
+            })),
+          });
+        } else if (hadRubric) {
+          await del(`/api/coursework/${cwId}/rubric`);
+        }
       }
       toast.success(
         state === 'PUBLISHED' ? 'Опубликовано' : state === 'SCHEDULED' ? 'Публикация запланирована' : 'Черновик сохранён',
@@ -403,6 +552,23 @@ export function CourseworkEditorPage() {
                 </span>
               </div>
             </>
+          )}
+
+          {brand.features.rubrics && !isMaterial && !isQuiz && (
+            rubric.length > 0 ? (
+              <RubricEditor criteria={rubric} onChange={setRubric} />
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ alignSelf: 'flex-start' }}
+                onClick={() =>
+                  setRubric([{ key: String(Date.now()), title: '', description: '', levels: [{ title: '', points: 1 }] }])
+                }
+              >
+                Добавить рубрику оценивания
+              </button>
+            )
           )}
         </div>
 

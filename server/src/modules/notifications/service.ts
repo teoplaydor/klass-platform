@@ -2,6 +2,7 @@
 // Дополнительные каналы (email, Telegram, SMS) подключаются реализацией
 // интерфейса NotificationChannel — см. docs/МОДУЛИ.md.
 import { run, now } from '../../core/db.js';
+import { brand } from '../../config.js';
 
 export type NotificationType =
   | 'NEW_COURSEWORK'
@@ -31,6 +32,7 @@ export function registerChannel(channel: NotificationChannel): void {
 }
 
 export function notify(userIds: number[], message: Omit<NotificationMessage, 'userId'>): void {
+  if (!brand.features.notifications) return;
   const ts = now();
   for (const userId of userIds) {
     run(

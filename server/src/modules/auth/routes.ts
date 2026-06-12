@@ -13,8 +13,12 @@ export const authRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function setSessionCookie(res: Response, userId: number): void {
-  res.cookie(COOKIE_NAME, issueToken(userId), {
+// Фиктивный хэш для выравнивания времени ответа при несуществующем email
+// (защита от перечисления пользователей по таймингу).
+const DUMMY_HASH = hashPassword('dummy-timing-equalizer');
+
+function setSessionCookie(res: Response, userId: number, tokenVersion: number): void {
+  res.cookie(COOKIE_NAME, issueToken(userId, tokenVersion), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -51,21 +55,24 @@ authRouter.post('/register', (req, res) => {
     middleName,
     now(),
   );
-  setSessionCookie(res, id);
+  setSessionCookie(res, id, 0);
   res.status(201).json({ user: publicUser(id) });
 });
 
 authRouter.post('/login', (req, res) => {
   const email = str(req.body, 'email', { max: 254 }).toLowerCase();
   const password = str(req.body, 'password', { max: 128 });
-  const row = get<{ id: number; password_hash: string }>(
-    'SELECT id, password_hash FROM users WHERE email = ?',
+  const row = get<{ id: number; password_hash: string; token_version: number }>(
+    'SELECT id, password_hash, token_version FROM users WHERE email = ?',
     email,
   );
-  if (!row || !verifyPassword(password, row.password_hash)) {
+  // Проверка выполняется всегда (по фиктивному хэшу при отсутствии пользователя),
+  // чтобы время ответа не раскрывало, зарегистрирован ли email
+  const valid = verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
+  if (!row || !valid) {
     throw unauthorized('Неверный email или пароль');
   }
-  setSessionCookie(res, row.id);
+  setSessionCookie(res, row.id, row.token_version);
   res.json({ user: publicUser(row.id) });
 });
 
@@ -101,10 +108,19 @@ authRouter.post('/change-password', requireAuth, (req, res) => {
   const user = currentUser(req);
   const oldPassword = str(req.body, 'oldPassword', { max: 128 });
   const newPassword = str(req.body, 'newPassword', { min: 8, max: 128 });
-  const row = get<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = ?', user.id);
+  const row = get<{ password_hash: string; token_version: number }>(
+    'SELECT password_hash, token_version FROM users WHERE id = ?',
+    user.id,
+  );
   if (!row || !verifyPassword(oldPassword, row.password_hash)) {
     throw badRequest('Текущий пароль указан неверно');
   }
-  run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(newPassword), user.id);
+  // Инкремент версии отзывает все ранее выданные сессии на других устройствах
+  const newVersion = row.token_version + 1;
+  run(
+    'UPDATE users SET password_hash = ?, token_version = ? WHERE id = ?',
+    hashPassword(newPassword), newVersion, user.id,
+  );
+  setSessionCookie(res, user.id, newVersion);
   res.json({ ok: true });
 });

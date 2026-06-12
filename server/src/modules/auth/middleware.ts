@@ -36,13 +36,17 @@ export function parseCookies(header: string | undefined): Record<string, string>
 export function attachUser(req: Request, _res: Response, next: NextFunction): void {
   const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
   if (token) {
-    const uid = verifyToken(token);
-    if (uid) {
-      const user = get<SessionUser>(
-        'SELECT id, email, last_name, first_name, middle_name, global_role FROM users WHERE id = ?',
-        uid,
+    const payload = verifyToken(token);
+    if (payload) {
+      const user = get<SessionUser & { token_version: number }>(
+        'SELECT id, email, last_name, first_name, middle_name, global_role, token_version FROM users WHERE id = ?',
+        payload.uid,
       );
-      if (user) req.user = user;
+      // Токены, выпущенные до смены пароля, недействительны
+      if (user && user.token_version === payload.ver) {
+        const { token_version, ...sessionUser } = user;
+        req.user = sessionUser;
+      }
     }
   }
   next();

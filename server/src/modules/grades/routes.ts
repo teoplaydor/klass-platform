@@ -26,12 +26,22 @@ gradesRouter.get('/courses/:courseId/grades', (req, res) => {
   const { role } = requireMember(courseId, user.id);
 
   // Оцениваемые опубликованные задания курса (столбцы журнала)
-  const works = all<WorkCol>(
+  let works = all<WorkCol>(
     `SELECT id, title, max_points, due_at, type FROM coursework
      WHERE course_id = ? AND state = 'PUBLISHED' AND type != 'MATERIAL'
      ORDER BY due_at IS NULL, due_at, id`,
     courseId,
   );
+  // Ученик не видит столбцы заданий, адресованных только другим ученикам
+  if (role === 'STUDENT') {
+    works = works.filter((w) => {
+      const assignees = all<{ user_id: number }>(
+        'SELECT user_id FROM coursework_assignees WHERE coursework_id = ?',
+        w.id,
+      );
+      return assignees.length === 0 || assignees.some((a) => a.user_id === user.id);
+    });
+  }
 
   if (role === 'TEACHER') {
     const students = all(

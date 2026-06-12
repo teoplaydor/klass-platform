@@ -222,7 +222,9 @@ export function CoursePage() {
                 { label: 'Скопировать код приглашения', onClick: () => void copyCode() },
                 { label: 'Сбросить код приглашения', onClick: () => void resetCode() },
                 { label: 'Создать копию курса', onClick: () => void copyCourse() },
-                { label: 'В архив', onClick: () => void archiveCourse(), danger: true },
+                ...(brand.features.archive && course.state === 'ACTIVE'
+                  ? [{ label: 'В архив', onClick: () => void archiveCourse(), danger: true }]
+                  : []),
               ]}
             />
           )}

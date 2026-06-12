@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { all, get, run, now, tx } from '../../core/db.js';
 import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { optNum, optStr, idParam } from '../../core/validate.js';
-import { memberRole, requireTeacher } from '../../core/access.js';
+import { courseById, memberRole, requireActive, requireTeacher } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { attachItems, attachmentsFor } from '../files/attachments.js';
 import { brand } from '../../config.js';
@@ -65,13 +65,32 @@ function rubricGradesOf(submissionId: number) {
   );
 }
 
-function fullSubmission(sub: SubmissionRow, cw: CourseworkRow) {
-  return {
+// Проекция сдачи по роли запрашивающего: ученик НЕ видит черновик оценки
+// (draft_grade) и оценки по рубрике до возврата работы.
+function fullSubmission(sub: SubmissionRow, cw: CourseworkRow, viewer: 'TEACHER' | 'STUDENT') {
+  const base = {
     ...sub,
     late: isLate(sub, cw),
     attachments: attachmentsFor('SUBMISSION', sub.id),
-    rubricGrades: rubricGradesOf(sub.id),
   };
+  if (viewer === 'TEACHER') {
+    return { ...base, rubricGrades: rubricGradesOf(sub.id) };
+  }
+  return {
+    ...base,
+    draft_grade: null,
+    rubricGrades: sub.state === 'RETURNED' ? rubricGradesOf(sub.id) : [],
+  };
+}
+
+// Действия ученика над сдачей: проверяет владение, актуальное членство
+// в курсе, видимость задания и что курс не в архиве.
+function requireOwnedActionable(sub: SubmissionRow, cw: CourseworkRow, userId: number): void {
+  if (sub.student_id !== userId) throw forbidden();
+  if (memberRole(cw.course_id, userId) !== 'STUDENT' || !visibleToStudent(cw, userId)) {
+    throw notFound('Задание не найдено');
+  }
+  requireActive(courseById(cw.course_id));
 }
 
 // Список сдач для преподавателя: все адресаты задания со статусами.
@@ -80,6 +99,7 @@ submissionsRouter.get('/coursework/:id/submissions', (req, res) => {
   const cw = courseworkById(idParam(req.params.id));
   requireTeacher(cw.course_id, user.id);
   if (cw.type === 'MATERIAL') throw badRequest('У материала нет сдач');
+  if (cw.state !== 'PUBLISHED') throw badRequest('Задание ещё не опубликовано — работ нет');
 
   const items = audienceOf(cw).map((studentId) => {
     const student = get(
@@ -87,7 +107,14 @@ submissionsRouter.get('/coursework/:id/submissions', (req, res) => {
       studentId,
     );
     const sub = ensureSubmission(cw.id, studentId);
-    return { student, submission: fullSubmission(sub, cw) };
+    return {
+      student,
+      submission: {
+        ...fullSubmission(sub, cw, 'TEACHER'),
+        // Для теста преподаватель сразу видит ответы и баллы автопроверки
+        quizAnswers: cw.type === 'QUIZ' ? answersOf(sub.id) : undefined,
+      },
+    };
   });
   res.json({ submissions: items });
 });
@@ -101,7 +128,7 @@ submissionsRouter.get('/coursework/:id/my', (req, res) => {
   }
   if (cw.type === 'MATERIAL') throw badRequest('У материала нет сдач');
   const sub = ensureSubmission(cw.id, user.id);
-  const body: Record<string, unknown> = { submission: fullSubmission(sub, cw) };
+  const body: Record<string, unknown> = { submission: fullSubmission(sub, cw, 'STUDENT') };
   if (cw.type === 'QUIZ') {
     // Баллы автопроверки ученик видит после возврата работы
     // или сразу после сдачи, если включено в настройках теста
@@ -118,6 +145,7 @@ submissionsRouter.get('/submissions/:id', (req, res) => {
   const { sub, cw } = submissionById(idParam(req.params.id));
   const role = memberRole(cw.course_id, user.id);
   if (sub.student_id !== user.id && role !== 'TEACHER') throw forbidden();
+  const viewer = role === 'TEACHER' ? 'TEACHER' : 'STUDENT';
   const student = get(
     'SELECT id, email, last_name, first_name, middle_name FROM users WHERE id = ?',
     sub.student_id,
@@ -126,15 +154,15 @@ submissionsRouter.get('/submissions/:id', (req, res) => {
     'SELECT event, payload, actor_id, created_at FROM submission_events WHERE submission_id = ? ORDER BY id',
     sub.id,
   );
-  const quizAnswers = cw.type === 'QUIZ' && role === 'TEACHER' ? answersOf(sub.id) : undefined;
-  res.json({ submission: { ...fullSubmission(sub, cw), student, events, quizAnswers }, coursework: cw });
+  const quizAnswers = cw.type === 'QUIZ' && viewer === 'TEACHER' ? answersOf(sub.id) : undefined;
+  res.json({ submission: { ...fullSubmission(sub, cw, viewer), student, events, quizAnswers }, coursework: cw });
 });
 
 // Ученик редактирует ответ и вложения (пока работа не сдана).
 submissionsRouter.patch('/submissions/:id', (req, res) => {
   const user = currentUser(req);
   const { sub, cw } = submissionById(idParam(req.params.id));
-  if (sub.student_id !== user.id) throw forbidden();
+  requireOwnedActionable(sub, cw, user.id);
   if (sub.state === 'TURNED_IN') throw badRequest('Работа уже сдана. Отмените сдачу, чтобы внести изменения');
 
   const answerText = optStr(req.body, 'answerText', { max: 50000 });
@@ -145,13 +173,13 @@ submissionsRouter.patch('/submissions/:id', (req, res) => {
       saveAnswers(sub.id, cw.id, req.body.answers);
     }
   });
-  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw) });
+  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw, 'STUDENT') });
 });
 
 submissionsRouter.post('/submissions/:id/turn-in', (req, res) => {
   const user = currentUser(req);
   const { sub, cw } = submissionById(idParam(req.params.id));
-  if (sub.student_id !== user.id) throw forbidden();
+  requireOwnedActionable(sub, cw, user.id);
   if (sub.state === 'TURNED_IN') throw badRequest('Работа уже сдана');
   if (!cw.allow_late && cw.due_at && Date.parse(cw.due_at) < Date.now()) {
     throw badRequest('Срок сдачи истёк, преподаватель не принимает работы с опозданием');
@@ -180,10 +208,15 @@ submissionsRouter.post('/submissions/:id/turn-in', (req, res) => {
 
 submissionsRouter.post('/submissions/:id/reclaim', (req, res) => {
   const user = currentUser(req);
-  const { sub } = submissionById(idParam(req.params.id));
-  if (sub.student_id !== user.id) throw forbidden();
+  const { sub, cw } = submissionById(idParam(req.params.id));
+  requireOwnedActionable(sub, cw, user.id);
   if (sub.state !== 'TURNED_IN') throw badRequest('Работа не находится в статусе «Сдано»');
-  run("UPDATE submissions SET state = 'RECLAIMED', updated_at = ? WHERE id = ?", now(), sub.id);
+  // Отметка времени сдачи сбрасывается, иначе после пересдачи в срок
+  // осталась бы пометка «с опозданием» от первой попытки
+  run(
+    "UPDATE submissions SET state = 'RECLAIMED', turned_in_at = NULL, updated_at = ? WHERE id = ?",
+    now(), sub.id,
+  );
   recordEvent(sub.id, user.id, 'RECLAIMED');
   res.json({ ok: true });
 });
@@ -192,18 +225,18 @@ submissionsRouter.post('/submissions/:id/reclaim', (req, res) => {
 submissionsRouter.post('/submissions/:id/grade', (req, res) => {
   const user = currentUser(req);
   const { sub, cw } = submissionById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   const draftGrade = optNum(req.body, 'draftGrade', { min: 0, max: 100000 });
   run('UPDATE submissions SET draft_grade = ?, updated_at = ? WHERE id = ?', draftGrade, now(), sub.id);
   recordEvent(sub.id, user.id, 'GRADE_CHANGED', { draftGrade });
-  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw) });
+  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw, 'TEACHER') });
 });
 
 // Возврат работы: публикует оценку и уведомляет ученика.
 submissionsRouter.post('/submissions/:id/return', (req, res) => {
   const user = currentUser(req);
   const { sub, cw } = submissionById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   const explicit = optNum(req.body, 'grade', { min: 0, max: 100000 });
   const grade = explicit ?? sub.draft_grade;
   const ts = now();
@@ -218,7 +251,7 @@ submissionsRouter.post('/submissions/:id/return', (req, res) => {
     body: cw.title,
     link: `/courses/${cw.course_id}/coursework/${cw.id}`,
   });
-  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw) });
+  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw, 'TEACHER') });
 });
 
 // Оценка по рубрике: выбор уровня по каждому критерию, сумма — в черновик оценки.
@@ -226,7 +259,7 @@ submissionsRouter.put('/submissions/:id/rubric', (req, res) => {
   if (!brand.features.rubrics) throw forbidden('Рубрики отключены');
   const user = currentUser(req);
   const { sub, cw } = submissionById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   const rubric = get<{ id: number }>('SELECT id FROM rubrics WHERE coursework_id = ?', cw.id);
   if (!rubric) throw badRequest('У задания нет рубрики');
 
@@ -257,5 +290,5 @@ submissionsRouter.put('/submissions/:id/rubric', (req, res) => {
     return sum;
   });
   recordEvent(sub.id, user.id, 'GRADE_CHANGED', { draftGrade: total, source: 'rubric' });
-  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw) });
+  res.json({ submission: fullSubmission(get<SubmissionRow>('SELECT * FROM submissions WHERE id = ?', sub.id)!, cw, 'TEACHER') });
 });

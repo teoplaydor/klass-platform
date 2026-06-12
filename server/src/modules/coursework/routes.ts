@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { all, get, run, now, tx } from '../../core/db.js';
 import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { str, optStr, optNum, optDate, idParam, oneOf, optOneOf } from '../../core/validate.js';
-import { memberRole, requireMember, requireTeacher, studentIds } from '../../core/access.js';
+import { memberRole, requireActive, requireMember, requireTeacher, studentIds } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { attachItems, attachmentsFor } from '../files/attachments.js';
 import { brand } from '../../config.js';
@@ -58,10 +58,11 @@ export function visibleToStudent(cw: CourseworkRow, userId: number): boolean {
   return explicit.length === 0 || explicit.includes(userId);
 }
 
+// Сводка для ученика: без draft_grade — черновик оценки виден только преподавателю.
 function mySubmissionSummary(courseworkId: number, userId: number) {
   return (
     get(
-      `SELECT id, state, grade, draft_grade, turned_in_at, returned_at
+      `SELECT id, state, grade, turned_in_at, returned_at
        FROM submissions WHERE coursework_id = ? AND student_id = ?`,
       courseworkId,
       userId,
@@ -140,6 +141,7 @@ courseworkRouter.post('/courses/:courseId/coursework', (req, res) => {
   const user = currentUser(req);
   const courseId = idParam(req.params.courseId, 'courseId');
   const course = requireTeacher(courseId, user.id);
+  requireActive(course);
 
   const type = oneOf(req.body, 'type', ['ASSIGNMENT', 'QUIZ', 'QUESTION', 'MATERIAL'] as const);
   if (type === 'QUIZ' && !brand.features.quizzes) throw forbidden('Модуль тестов отключён');
@@ -226,7 +228,7 @@ courseworkRouter.get('/coursework/:id', (req, res) => {
 courseworkRouter.patch('/coursework/:id', (req, res) => {
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
-  const course = requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
 
   const title = str(req.body, 'title', { max: 300 });
   const description = optStr(req.body, 'description', { max: 20000 });
@@ -246,6 +248,18 @@ courseworkRouter.patch('/coursework/:id', (req, res) => {
        allow_late = ?, topic_id = ?, updated_at = ? WHERE id = ?`,
       title, description, maxPoints, dueAt, allowLate, topicId, now(), cw.id,
     );
+    // Изменение адресатов: undefined — не трогать, массив — полная замена
+    // (пустой массив = всем ученикам курса)
+    const assigneeIds = req.body.assigneeIds;
+    if (Array.isArray(assigneeIds)) {
+      run('DELETE FROM coursework_assignees WHERE coursework_id = ?', cw.id);
+      const courseStudents = new Set(studentIds(cw.course_id));
+      for (const raw of assigneeIds) {
+        const sid = Number(raw);
+        if (!courseStudents.has(sid)) throw badRequest('В списке назначения есть пользователь не из курса');
+        run('INSERT INTO coursework_assignees (coursework_id, user_id) VALUES (?, ?)', cw.id, sid);
+      }
+    }
     attachItems(req.body.attachments, 'COURSEWORK', cw.id, user.id, brand.limits.maxAttachmentsPerPost);
   });
   res.json({ coursework: listItemFor(courseworkById(cw.id), 'TEACHER', user.id) });
@@ -255,6 +269,7 @@ courseworkRouter.post('/coursework/:id/publish', (req, res) => {
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
   const course = requireTeacher(cw.course_id, user.id);
+  requireActive(course);
   if (cw.state === 'PUBLISHED') throw badRequest('Уже опубликовано');
   run("UPDATE coursework SET state = 'PUBLISHED', scheduled_at = NULL, updated_at = ? WHERE id = ?", now(), cw.id);
   publishNotifications(courseworkById(cw.id), course.name);
@@ -264,7 +279,7 @@ courseworkRouter.post('/coursework/:id/publish', (req, res) => {
 courseworkRouter.delete('/coursework/:id', (req, res) => {
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   run('DELETE FROM coursework WHERE id = ?', cw.id);
   res.json({ ok: true });
 });
@@ -274,7 +289,7 @@ courseworkRouter.put('/coursework/:id/rubric', (req, res) => {
   if (!brand.features.rubrics) throw forbidden('Рубрики отключены');
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   if (cw.type === 'MATERIAL') throw badRequest('У материала не может быть рубрики');
 
   const criteria = req.body.criteria;
@@ -311,7 +326,7 @@ courseworkRouter.put('/coursework/:id/rubric', (req, res) => {
 courseworkRouter.delete('/coursework/:id/rubric', (req, res) => {
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   run('DELETE FROM rubrics WHERE coursework_id = ?', cw.id);
   res.json({ ok: true });
 });

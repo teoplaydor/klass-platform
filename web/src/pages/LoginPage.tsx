@@ -104,6 +104,11 @@ export function LoginPage() {
             )}
           </p>
         )}
+
+        <p className="small faint mt-16" style={{ textAlign: 'center' }}>
+          {brand.product.company} · Поддержка:{' '}
+          <a href={`mailto:${brand.product.supportEmail}`}>{brand.product.supportEmail}</a>
+        </p>
       </div>
     </div>
   );

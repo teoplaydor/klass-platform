@@ -3,11 +3,12 @@
 // приватные комментарии и банк комментариев.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { del, get, post } from '../api';
+import { del, get, post, put } from '../api';
+import { useBrand } from '../brand';
 import { Avatar, Empty, Spinner, useToast } from '../components/ui';
 import { AttachmentList } from '../components/ui';
 import { Comments } from '../components/Comments';
-import type { Course, Coursework, PersonRef, QuizQuestion, Submission } from '../types';
+import type { Course, Coursework, PersonRef, QuizQuestion, Rubric, Submission } from '../types';
 import {
   SUBMISSION_STATE_LABEL,
   formatDateTime,
@@ -80,8 +81,66 @@ function CommentBankPanel({ onPick }: { onPick: (text: string) => void }) {
   );
 }
 
+// Оценка по рубрике: выбор уровня по каждому критерию, сумма — в черновик.
+function RubricPanel({
+  rubric,
+  submission,
+  onGraded,
+}: {
+  rubric: Rubric;
+  submission: Submission;
+  onGraded: () => void;
+}) {
+  const toast = useToast();
+  const [selected, setSelected] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    const initial: Record<number, number> = {};
+    for (const g of submission.rubricGrades) initial[g.criterion_id] = g.level_id;
+    setSelected(initial);
+  }, [submission.id, submission.rubricGrades.length]);
+
+  const pick = async (criterionId: number, levelId: number) => {
+    const next = { ...selected, [criterionId]: levelId };
+    setSelected(next);
+    try {
+      await put(`/api/submissions/${submission.id}/rubric`, { grades: next });
+      onGraded();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
+  return (
+    <div className="card card-pad stack" style={{ gap: 10 }}>
+      <h3>Рубрика оценивания</h3>
+      {rubric.criteria.map((c) => (
+        <div key={c.id}>
+          <div className="small" style={{ fontWeight: 500, marginBottom: 4 }}>
+            {c.title}
+            {c.description && <span className="faint"> — {c.description}</span>}
+          </div>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            {c.levels.map((l) => (
+              <button
+                key={l.id}
+                className={selected[c.id] === l.id ? 'btn btn-sm' : 'btn btn-secondary btn-sm'}
+                onClick={() => void pick(c.id, l.id)}
+              >
+                {l.title} · {l.points}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="small faint">Сумма выбранных уровней записывается в черновик оценки.</p>
+    </div>
+  );
+}
+
 export function ReviewPage() {
   const { courseId, courseworkId } = useParams();
+  const brand = useBrand();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
 
@@ -165,13 +224,18 @@ export function ReviewPage() {
     if (!current) return;
     setBusy(true);
     try {
-      if (privateComment.trim()) {
-        await post('/api/comments', {
-          scope: 'SUBMISSION',
-          scopeId: current.submission.id,
-          text: privateComment.trim(),
-        });
-        setPrivateComment('');
+      // Сбой отправки комментария не должен блокировать возврат работы
+      if (privateComment.trim() && brand.features.privateComments) {
+        try {
+          await post('/api/comments', {
+            scope: 'SUBMISSION',
+            scopeId: current.submission.id,
+            text: privateComment.trim(),
+          });
+          setPrivateComment('');
+        } catch (e) {
+          toast.error(e);
+        }
       }
       await post(`/api/submissions/${current.submission.id}/return`, {
         grade: gradeInput === '' ? undefined : Number(gradeInput),
@@ -309,27 +373,37 @@ export function ReviewPage() {
                   Вернуть с оценкой
                 </button>
               </div>
-              <textarea
-                className="textarea"
-                style={{ minHeight: 60 }}
-                placeholder="Приватный комментарий ученику (отправится при возврате)"
-                value={privateComment}
-                onChange={(e) => setPrivateComment(e.target.value)}
-              />
+              {brand.features.privateComments && (
+                <textarea
+                  className="textarea"
+                  style={{ minHeight: 60 }}
+                  placeholder="Приватный комментарий ученику (отправится при возврате)"
+                  value={privateComment}
+                  onChange={(e) => setPrivateComment(e.target.value)}
+                />
+              )}
             </div>
 
-            <CommentBankPanel onPick={(text) => setPrivateComment((v) => (v ? `${v}\n${text}` : text))} />
+            {brand.features.rubrics && cw.rubric && cw.rubric.criteria.length > 0 && (
+              <RubricPanel rubric={cw.rubric} submission={current.submission} onGraded={() => void load()} />
+            )}
 
-            <div className="card card-pad">
-              <Comments
-                scope="SUBMISSION"
-                scopeId={current.submission.id}
-                canComment
-                canModerate
-                title="Приватная переписка с учеником"
-                compact
-              />
-            </div>
+            {brand.features.privateComments && (
+              <CommentBankPanel onPick={(text) => setPrivateComment((v) => (v ? `${v}\n${text}` : text))} />
+            )}
+
+            {brand.features.privateComments && (
+              <div className="card card-pad">
+                <Comments
+                  scope="SUBMISSION"
+                  scopeId={current.submission.id}
+                  canComment={course.state === 'ACTIVE'}
+                  canModerate
+                  title="Приватная переписка с учеником"
+                  compact
+                />
+              </div>
+            )}
           </div>
         ) : (
           <Empty>Выберите ученика из списка.</Empty>

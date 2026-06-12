@@ -1,6 +1,6 @@
 // Сервис тестов: валидация вопросов и автопроверка ответов.
 import { all, get, run } from '../../core/db.js';
-import { badRequest } from '../../core/errors.js';
+import { badRequest, conflict } from '../../core/errors.js';
 
 export interface QuizQuestionRow {
   id: number;
@@ -44,10 +44,26 @@ interface QuestionInput {
   points?: unknown;
 }
 
+// Есть ли уже ответы учеников на вопросы этого теста.
+export function hasStudentAnswers(courseworkId: number): boolean {
+  return !!get(
+    `SELECT 1 FROM quiz_answers a JOIN quiz_questions q ON q.id = a.question_id
+     WHERE q.coursework_id = ? LIMIT 1`,
+    courseworkId,
+  );
+}
+
 // Полная замена вопросов теста. Возвращает суммарный балл.
+// Запрещена после того, как ученики начали отвечать: каскадное удаление
+// вопросов стёрло бы их ответы и результаты автопроверки.
 export function replaceQuestions(courseworkId: number, rawQuestions: unknown): number {
   if (!Array.isArray(rawQuestions) || rawQuestions.length === 0 || rawQuestions.length > 100) {
     throw badRequest('Тест должен содержать от 1 до 100 вопросов');
+  }
+  if (hasStudentAnswers(courseworkId)) {
+    throw conflict(
+      'Ученики уже отвечали на этот тест — изменение вопросов удалило бы их ответы. Создайте копию задания.',
+    );
   }
   run('DELETE FROM quiz_questions WHERE coursework_id = ?', courseworkId);
   let total = 0;
@@ -103,6 +119,9 @@ const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').rep
 
 // Проверяет один ответ, возвращает начисленные баллы.
 function gradeAnswer(q: QuizQuestionRow, answer: unknown): number {
+  // Отсутствие ответа — всегда 0 баллов (без приведения null к числу 0,
+  // иначе пропущенный вопрос с верным вариантом №0 получал бы полный балл)
+  if (answer === null || answer === undefined || answer === '') return 0;
   const correct = JSON.parse(q.correct) as unknown;
   if (q.type === 'SINGLE') {
     return Number(answer) === Number(correct) ? q.points : 0;

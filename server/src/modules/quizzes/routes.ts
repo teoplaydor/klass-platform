@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { run, now } from '../../core/db.js';
 import { badRequest, forbidden, notFound } from '../../core/errors.js';
 import { idParam } from '../../core/validate.js';
-import { memberRole, requireTeacher } from '../../core/access.js';
+import { memberRole, requireActive, requireTeacher } from '../../core/access.js';
 import { currentUser, requireAuth } from '../auth/middleware.js';
 import { brand } from '../../config.js';
 import { courseworkById, visibleToStudent } from '../coursework/routes.js';
@@ -36,7 +36,7 @@ quizzesRouter.put('/coursework/:id/quiz', (req, res) => {
   requireQuizFeature();
   const user = currentUser(req);
   const cw = courseworkById(idParam(req.params.id));
-  requireTeacher(cw.course_id, user.id);
+  requireActive(requireTeacher(cw.course_id, user.id));
   if (cw.type !== 'QUIZ') throw badRequest('Это не тест');
   const total = replaceQuestions(cw.id, req.body.questions);
   const showScore = req.body.showScore === true ? 1 : 0;
