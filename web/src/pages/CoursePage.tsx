@@ -29,6 +29,7 @@ function CourseSettingsModal({
   const [themeColor, setThemeColor] = useState(course.theme_color);
   const [streamMode, setStreamMode] = useState(course.stream_mode);
   const [gradeScale, setGradeScale] = useState(course.grade_scale);
+  const [meetUrl, setMeetUrl] = useState(course.meet_url ?? '');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -36,6 +37,7 @@ function CourseSettingsModal({
     try {
       const r = await patch<{ course: Course }>(`/api/courses/${course.id}`, {
         name, section, subject, room, description, themeColor, streamMode, gradeScale,
+        meetUrl: meetUrl.trim() || null,
       });
       toast.success('Настройки сохранены');
       onSaved(r.course);
@@ -84,6 +86,14 @@ function CourseSettingsModal({
       <Field label="Описание">
         <textarea className="textarea" value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
+      <Field label="Ссылка на видеовстречу (Телемост, SberJazz, Jitsi и т. п.)">
+        <input
+          className="input"
+          value={meetUrl}
+          onChange={(e) => setMeetUrl(e.target.value)}
+          placeholder="https://meet.jit.si/nazvanie-kursa"
+        />
+      </Field>
       <Field label="Цвет курса">
         <div className="row" style={{ flexWrap: 'wrap' }}>
           {Object.entries(brand.theme.courseColors).map(([key, color]) => (
@@ -128,6 +138,37 @@ function CourseSettingsModal({
   );
 }
 
+// Jitsi-комнаты открываются внутри приложения; остальные сервисы
+// (Телемост, SberJazz) запрещают встраивание — открываются новой вкладкой.
+function isEmbeddableMeet(url: string): boolean {
+  try {
+    return /jit/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function MeetModal({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 1080, height: 'min(640px, 80vh)', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-head">
+          <h2>Видеовстреча</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Закрыть">
+            ×
+          </button>
+        </div>
+        <iframe
+          src={url}
+          title="Видеовстреча"
+          style={{ flex: 1, border: 'none', borderRadius: '0 0 var(--radius) var(--radius)' }}
+          allow="camera; microphone; fullscreen; display-capture; autoplay"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function CoursePage() {
   const { courseId } = useParams();
   const brand = useBrand();
@@ -136,6 +177,7 @@ export function CoursePage() {
   const [params, setParams] = useSearchParams();
   const [course, setCourse] = useState<Course | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [meetOpen, setMeetOpen] = useState(false);
 
   const tab = params.get('tab') ?? 'stream';
   const setTab = (t: string) => setParams(t === 'stream' ? {} : { tab: t });
@@ -229,11 +271,27 @@ export function CoursePage() {
             />
           )}
         </div>
-        {isTeacher && course.enrollment_code && (
-          <div className="mt-8 muted-inverse small">
-            Код курса: <strong style={{ letterSpacing: '0.08em' }}>{course.enrollment_code}</strong>
-          </div>
-        )}
+        <div className="row mt-8" style={{ justifyContent: 'space-between' }}>
+          {isTeacher && course.enrollment_code ? (
+            <div className="muted-inverse small">
+              Код курса: <strong style={{ letterSpacing: '0.08em' }}>{course.enrollment_code}</strong>
+            </div>
+          ) : (
+            <span />
+          )}
+          {course.meet_url && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() =>
+                isEmbeddableMeet(course.meet_url!)
+                  ? setMeetOpen(true)
+                  : window.open(course.meet_url!, '_blank', 'noopener')
+              }
+            >
+              Видеовстреча
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="tabs card mb-16" style={{ borderRadius: 'var(--radius)' }}>
@@ -261,6 +319,7 @@ export function CoursePage() {
           }}
         />
       )}
+      {meetOpen && course.meet_url && <MeetModal url={course.meet_url} onClose={() => setMeetOpen(false)} />}
     </div>
   );
 }

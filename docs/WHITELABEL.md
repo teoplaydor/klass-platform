@@ -83,6 +83,7 @@
 | `SESSION_SECRET` | секрет подписи сессий (обязателен в продакшене) | автогенерация в `DATA_DIR` |
 | `SESSION_TTL_DAYS` | срок жизни сессии | `30` |
 | `NODE_ENV` | `production` включает Secure-cookie | — |
+| `YANDEX_CLIENT_ID` / `YANDEX_CLIENT_SECRET` | вход через Яндекс ID (см. ИНТЕГРАЦИЯ.md, раздел 3) | выключено |
 
 ## 4. Что НЕ нужно менять
 

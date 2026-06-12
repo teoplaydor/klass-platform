@@ -14,10 +14,21 @@ import { BrandContext } from '../brand';
 import type { Attachment, PersonRef } from '../types';
 import { formatBytes, initials } from '../utils';
 
+// Экран загрузки: ручка построчно «пишет» на листе (анимация в theme.css).
 export function Spinner() {
   return (
-    <div className="spinner-wrap">
-      <div className="spinner" />
+    <div className="spinner-wrap" role="status" aria-label="Загрузка">
+      <svg className="pen-loader" width="120" height="96" viewBox="0 0 120 96" xmlns="http://www.w3.org/2000/svg">
+        <rect className="paper" x="14" y="10" width="92" height="76" rx="7" />
+        <line className="ink ink-1" x1="30" y1="30" x2="86" y2="30" />
+        <line className="ink ink-2" x1="30" y1="46" x2="90" y2="46" />
+        <line className="ink ink-3" x1="30" y1="62" x2="72" y2="62" />
+        <path
+          className="pen"
+          d="M 0 0 L 10 -14 L 13.5 -11.5 L 3.5 2.5 L -0.5 3.5 Z"
+          transform="translate(30, 30)"
+        />
+      </svg>
     </div>
   );
 }

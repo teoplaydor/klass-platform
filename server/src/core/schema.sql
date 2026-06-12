@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS courses (
   stream_mode     TEXT    NOT NULL DEFAULT 'ALL_POST',
   -- Шкала отображения оценок: POINTS (баллы), FIVE (5-балльная), PERCENT (проценты)
   grade_scale     TEXT    NOT NULL DEFAULT 'FIVE',
+  -- Ссылка на комнату видеовстречи (Телемост, SberJazz, Jitsi и т. п.)
+  meet_url        TEXT,
   created_at      TEXT    NOT NULL,
   updated_at      TEXT    NOT NULL
 );

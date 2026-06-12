@@ -121,11 +121,20 @@ coursesRouter.patch('/:id', (req, res) => {
   const themeColor = optOneOf(req.body, 'themeColor', colorKeys as readonly string[]);
   const streamMode = optOneOf(req.body, 'streamMode', ['ALL_POST', 'COMMENT_ONLY', 'TEACHERS_ONLY'] as const);
   const gradeScale = optOneOf(req.body, 'gradeScale', ['POINTS', 'FIVE', 'PERCENT'] as const);
+  const meetUrl = optStr(req.body, 'meetUrl', { max: 500 });
+  if (meetUrl !== null) {
+    try {
+      const u = new URL(meetUrl);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error();
+    } catch {
+      throw badRequest('Ссылка на видеовстречу должна начинаться с http:// или https://');
+    }
+  }
   run(
-    `UPDATE courses SET name = ?, section = ?, subject = ?, room = ?, description = ?,
+    `UPDATE courses SET name = ?, section = ?, subject = ?, room = ?, description = ?, meet_url = ?,
      theme_color = COALESCE(?, theme_color), stream_mode = COALESCE(?, stream_mode),
      grade_scale = COALESCE(?, grade_scale), updated_at = ? WHERE id = ?`,
-    name, section, subject, room, description, themeColor, streamMode, gradeScale, now(), courseId,
+    name, section, subject, room, description, meetUrl, themeColor, streamMode, gradeScale, now(), courseId,
   );
   res.json({ course: courseListItem(courseId, user.id) });
 });

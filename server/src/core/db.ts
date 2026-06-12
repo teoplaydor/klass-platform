@@ -19,6 +19,17 @@ db.exec('PRAGMA foreign_keys = ON');
 const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
 db.exec(schema);
 
+// Миграции для существующих БД: добавление колонок, появившихся после релиза
+// (CREATE TABLE IF NOT EXISTS не меняет уже созданные таблицы).
+function ensureColumn(table: string, column: string, ddl: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+ensureColumn('courses', 'meet_url', 'meet_url TEXT');
+ensureColumn('users', 'token_version', 'token_version INTEGER NOT NULL DEFAULT 0');
+
 export type Row = Record<string, unknown>;
 type Param = string | number | null;
 

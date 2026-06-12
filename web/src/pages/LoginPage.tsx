@@ -1,5 +1,5 @@
 // Вход и регистрация.
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { post } from '../api';
 import { useBrand } from '../brand';
 import { useAuth } from '../auth';
@@ -12,6 +12,15 @@ export function LoginPage() {
   const toast = useToast();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [busy, setBusy] = useState(false);
+
+  // Сообщение об ошибке OAuth-входа (редирект ?authError=yandex)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('authError')) {
+      toast.error(new Error('Не удалось войти через Яндекс. Попробуйте ещё раз или войдите по паролю'));
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -84,6 +93,19 @@ export function LoginPage() {
             {mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
         </form>
+
+        {brand.auth?.yandex && (
+          <button
+            type="button"
+            className="btn btn-secondary mt-8"
+            style={{ width: '100%' }}
+            onClick={() => {
+              window.location.href = '/api/auth/yandex';
+            }}
+          >
+            Войти через Яндекс
+          </button>
+        )}
 
         {brand.features.registration && (
           <p className="small muted mt-16" style={{ textAlign: 'center' }}>

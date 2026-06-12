@@ -24,6 +24,7 @@ export interface Course {
   theme_color: string;
   stream_mode: 'ALL_POST' | 'COMMENT_ONLY' | 'TEACHERS_ONLY';
   grade_scale: 'POINTS' | 'FIVE' | 'PERCENT';
+  meet_url: string | null;
   role: CourseRole | null;
   teachers: { last_name: string; first_name: string; middle_name: string | null }[];
   studentsCount: number;
@@ -202,4 +203,5 @@ export interface BrandConfig {
   };
   features: Record<string, boolean>;
   limits: { maxUploadSizeMb: number; maxAttachmentsPerPost: number };
+  auth?: { yandex: boolean };
 }

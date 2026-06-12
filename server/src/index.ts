@@ -7,6 +7,7 @@ import { brand, config } from './config.js';
 import { errorHandler, notFound } from './core/errors.js';
 import { attachUser } from './modules/auth/middleware.js';
 import { authRouter } from './modules/auth/routes.js';
+import { yandexEnabled, yandexRouter } from './modules/auth/yandex.js';
 import { coursesRouter } from './modules/courses/routes.js';
 import { topicsRouter } from './modules/topics/routes.js';
 import { courseworkRouter } from './modules/coursework/routes.js';
@@ -23,6 +24,8 @@ import { startScheduler } from './core/scheduler.js';
 
 const app = express();
 app.disable('x-powered-by');
+// За обратным прокси (nginx) корректно определять протокол и IP клиента
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(attachUser);
 
@@ -34,10 +37,12 @@ app.get('/api/config', (_req, res) => {
     theme: brand.theme,
     features: brand.features,
     limits: brand.limits,
+    auth: { yandex: yandexEnabled },
   });
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/auth', yandexRouter);
 app.use('/api/courses', coursesRouter);
 app.use('/api', topicsRouter);
 app.use('/api', courseworkRouter);

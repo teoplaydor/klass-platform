@@ -17,6 +17,7 @@ export interface CourseRow {
   theme_color: string;
   stream_mode: 'ALL_POST' | 'COMMENT_ONLY' | 'TEACHERS_ONLY';
   grade_scale: 'POINTS' | 'FIVE' | 'PERCENT';
+  meet_url: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { brand } from '../../config.js';
 import { get, run, now } from '../../core/db.js';
-import { badRequest, conflict, forbidden, unauthorized } from '../../core/errors.js';
+import { ApiError, badRequest, conflict, forbidden, unauthorized } from '../../core/errors.js';
 import { str, optStr } from '../../core/validate.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { issueToken } from './tokens.js';
@@ -17,7 +17,36 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // (защита от перечисления пользователей по таймингу).
 const DUMMY_HASH = hashPassword('dummy-timing-equalizer');
 
-function setSessionCookie(res: Response, userId: number, tokenVersion: number): void {
+// Ограничение частоты входа: до 10 неудачных попыток за 10 минут с одного IP.
+// Хранилище в памяти — достаточно для single-tenant инсталляции.
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 10;
+const loginFailures = new Map<string, { count: number; resetAt: number }>();
+
+function checkLoginRate(ip: string): void {
+  const entry = loginFailures.get(ip);
+  if (entry && entry.resetAt > Date.now() && entry.count >= LOGIN_MAX_FAILURES) {
+    throw new ApiError(429, 'TOO_MANY_ATTEMPTS', 'Слишком много попыток входа. Попробуйте через несколько минут');
+  }
+}
+
+function recordLoginFailure(ip: string): void {
+  const ts = Date.now();
+  const entry = loginFailures.get(ip);
+  if (!entry || entry.resetAt <= ts) {
+    loginFailures.set(ip, { count: 1, resetAt: ts + LOGIN_WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+  // Не даём карте расти бесконечно
+  if (loginFailures.size > 10000) {
+    for (const [key, value] of loginFailures) {
+      if (value.resetAt <= ts) loginFailures.delete(key);
+    }
+  }
+}
+
+export function setSessionCookie(res: Response, userId: number, tokenVersion: number): void {
   res.cookie(COOKIE_NAME, issueToken(userId, tokenVersion), {
     httpOnly: true,
     sameSite: 'lax',
@@ -60,6 +89,7 @@ authRouter.post('/register', (req, res) => {
 });
 
 authRouter.post('/login', (req, res) => {
+  checkLoginRate(req.ip ?? '');
   const email = str(req.body, 'email', { max: 254 }).toLowerCase();
   const password = str(req.body, 'password', { max: 128 });
   const row = get<{ id: number; password_hash: string; token_version: number }>(
@@ -70,6 +100,7 @@ authRouter.post('/login', (req, res) => {
   // чтобы время ответа не раскрывало, зарегистрирован ли email
   const valid = verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
   if (!row || !valid) {
+    recordLoginFailure(req.ip ?? '');
     throw unauthorized('Неверный email или пароль');
   }
   setSessionCookie(res, row.id, row.token_version);
