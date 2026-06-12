@@ -62,6 +62,22 @@ tx(() => {
     iso(2, 18, 0), teacher, ts, ts,
   ).lastInsertRowid;
 
+  // Рубрика оценивания для домашнего задания
+  const rubric1 = run('INSERT INTO rubrics (coursework_id) VALUES (?)', hw1).lastInsertRowid;
+  const crit1 = run(
+    "INSERT INTO rubric_criteria (rubric_id, title, description, position) VALUES (?, ?, ?, 0)",
+    rubric1, 'Точность построения', 'Вершина, нули и ось симметрии определены верно',
+  ).lastInsertRowid;
+  run("INSERT INTO rubric_levels (criterion_id, title, points, position) VALUES (?, 'Без ошибок', 6, 0)", crit1);
+  run("INSERT INTO rubric_levels (criterion_id, title, points, position) VALUES (?, 'Одна ошибка', 4, 1)", crit1);
+  run("INSERT INTO rubric_levels (criterion_id, title, points, position) VALUES (?, 'Несколько ошибок', 2, 2)", crit1);
+  const crit2 = run(
+    "INSERT INTO rubric_criteria (rubric_id, title, description, position) VALUES (?, ?, ?, 1)",
+    rubric1, 'Оформление', 'Подписаны оси, указаны промежутки возрастания и убывания',
+  ).lastInsertRowid;
+  run("INSERT INTO rubric_levels (criterion_id, title, points, position) VALUES (?, 'Полное', 4, 0)", crit2);
+  run("INSERT INTO rubric_levels (criterion_id, title, points, position) VALUES (?, 'Частичное', 2, 1)", crit2);
+
   // Сдачи: один вернул с оценкой, один сдал, остальные — назначено
   const sub1 = run(
     "INSERT INTO submissions (coursework_id, student_id, state, answer_text, draft_grade, grade, turned_in_at, returned_at, updated_at) VALUES (?, ?, 'RETURNED', ?, 9, 9, ?, ?, ?)",
