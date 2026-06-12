@@ -1,0 +1,47 @@
+{
+  "product": {
+    "name": "Класс",
+    "shortName": "Класс",
+    "tagline": "Платформа для организации учебного процесса",
+    "company": "Ваша компания",
+    "supportEmail": "support@example.ru",
+    "logoText": "К"
+  },
+  "theme": {
+    "colorPrimary": "#2456a4",
+    "colorPrimaryHover": "#1d4789",
+    "colorAccent": "#0e7a5f",
+    "colorDanger": "#b3261e",
+    "fontFamily": "system-ui, 'Segoe UI', Roboto, Arial, sans-serif",
+    "radius": "8px",
+    "courseColors": {
+      "blue": "#2456a4",
+      "green": "#0e7a5f",
+      "red": "#a4382e",
+      "purple": "#5b3d8f",
+      "teal": "#0f6c7c",
+      "brown": "#6d4c2f",
+      "slate": "#44525f",
+      "wine": "#7d2c4b"
+    }
+  },
+  "features": {
+    "registration": true,
+    "courseCreationByAnyone": true,
+    "grades": true,
+    "rubrics": true,
+    "calendar": true,
+    "todo": true,
+    "notifications": true,
+    "fileUploads": true,
+    "comments": true,
+    "privateComments": true,
+    "scheduling": true,
+    "archive": true,
+    "quizzes": true
+  },
+  "limits": {
+    "maxUploadSizeMb": 50,
+    "maxAttachmentsPerPost": 10
+  }
+}
